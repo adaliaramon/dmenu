@@ -48,9 +48,9 @@ static struct item *prev, *curr, *next, *sel;
 static int mon = -1, screen;
 
 static Atom clip, utf8;
-static Display *dpy;
-static Window root, parentwin, win;
-static XIC xic;
+static Display *display;
+static Window root, parentWindow, window;
+static XIC inputContext;
 
 static Drw *drw;
 static Clr *scheme[SchemeLast];
@@ -126,12 +126,12 @@ cleanup(void)
 {
 	size_t i;
 
-	XUngrabKey(dpy, AnyKey, AnyModifier, root);
+	XUngrabKey(display, AnyKey, AnyModifier, root);
 	for (i = 0; i < SchemeLast; i++)
 		free(scheme[i]);
 	drw_free(drw);
-	XSync(dpy, False);
-	XCloseDisplay(dpy);
+	XSync(display, False);
+	XCloseDisplay(display);
 }
 
 static char *
@@ -206,7 +206,7 @@ drawmenu(void)
 			drw_text(drw, mw - w, 0, w, bh, lrpad / 2, ">", 0);
 		}
 	}
-	drw_map(drw, win, 0, 0, mw, mh);
+	drw_map(drw, window, 0, 0, mw, mh);
 }
 
 static void
@@ -217,18 +217,16 @@ grabfocus(void)
 	int i, revertwin;
 
 	for (i = 0; i < 100; ++i) {
-		XGetInputFocus(dpy, &focuswin, &revertwin);
-		if (focuswin == win)
+		XGetInputFocus(display, &focuswin, &revertwin);
+		if (focuswin == window)
 			return;
-		XSetInputFocus(dpy, win, RevertToParent, CurrentTime);
+		XSetInputFocus(display, window, RevertToParent, CurrentTime);
 		nanosleep(&ts, NULL);
 	}
 	die("cannot grab focus");
 }
 
-static void
-grabkeyboard(void)
-{
+static void grabKeyboard(void) {
 	struct timespec ts = { .tv_sec = 0, .tv_nsec = 1000000  };
 	int i;
 
@@ -236,8 +234,8 @@ grabkeyboard(void)
 		return;
 	/* try to grab keyboard, we may have to wait for another process to ungrab */
 	for (i = 0; i < 1000; i++) {
-		if (XGrabKeyboard(dpy, DefaultRootWindow(dpy), True, GrabModeAsync,
-		                  GrabModeAsync, CurrentTime) == GrabSuccess)
+		if (XGrabKeyboard(display, DefaultRootWindow(display), True, GrabModeAsync,
+                          GrabModeAsync, CurrentTime) == GrabSuccess)
 			return;
 		nanosleep(&ts, NULL);
 	}
@@ -348,15 +346,13 @@ movewordedge(int dir)
 	}
 }
 
-static void
-keypress(XKeyEvent *ev)
-{
-	char buf[32];
-	int len;
-	KeySym ksym;
+static void keyPress(XKeyEvent *keyEvent) {
+	char buffer[32];
+	int length;
+	KeySym keySymbol;
 	Status status;
 
-	len = XmbLookupString(xic, ev, buf, sizeof buf, &ksym, &status);
+    length = XmbLookupString(inputContext, keyEvent, buffer, sizeof buffer, &keySymbol, &status);
 	switch (status) {
 	default: /* XLookupNone, XBufferOverflow */
 		return;
@@ -367,23 +363,23 @@ keypress(XKeyEvent *ev)
 		break;
 	}
 
-	if (ev->state & ControlMask) {
-		switch(ksym) {
-		case XK_a: ksym = XK_Home;      break;
-		case XK_b: ksym = XK_Left;      break;
-		case XK_c: ksym = XK_Escape;    break;
-		case XK_d: ksym = XK_Delete;    break;
-		case XK_e: ksym = XK_End;       break;
-		case XK_f: ksym = XK_Right;     break;
-		case XK_g: ksym = XK_Escape;    break;
-		case XK_h: ksym = XK_BackSpace; break;
-		case XK_i: ksym = XK_Tab;       break;
+	if (keyEvent->state & ControlMask) {
+		switch(keySymbol) {
+		case XK_a: keySymbol = XK_Home;      break;
+		case XK_b: keySymbol = XK_Left;      break;
+		case XK_c: keySymbol = XK_Escape;    break;
+		case XK_d: keySymbol = XK_Delete;    break;
+		case XK_e: keySymbol = XK_End;       break;
+		case XK_f: keySymbol = XK_Right;     break;
+		case XK_g: keySymbol = XK_Escape;    break;
+		case XK_h: keySymbol = XK_BackSpace; break;
+		case XK_i: keySymbol = XK_Tab;       break;
 		case XK_j: /* fallthrough */
 		case XK_J: /* fallthrough */
 		case XK_m: /* fallthrough */
-		case XK_M: ksym = XK_Return; ev->state &= ~ControlMask; break;
-		case XK_n: ksym = XK_Down;      break;
-		case XK_p: ksym = XK_Up;        break;
+		case XK_M: keySymbol = XK_Return; keyEvent->state &= ~ControlMask; break;
+		case XK_n: keySymbol = XK_Down;      break;
+		case XK_p: keySymbol = XK_Up;        break;
 
 		case XK_k: /* delete right */
 			text[cursor] = '\0';
@@ -400,8 +396,8 @@ keypress(XKeyEvent *ev)
 			break;
 		case XK_y: /* paste selection */
 		case XK_Y:
-			XConvertSelection(dpy, (ev->state & ShiftMask) ? clip : XA_PRIMARY,
-			                  utf8, utf8, win, CurrentTime);
+			XConvertSelection(display, (keyEvent->state & ShiftMask) ? clip : XA_PRIMARY,
+                              utf8, utf8, window, CurrentTime);
 			return;
 		case XK_Left:
 		case XK_KP_Left:
@@ -420,30 +416,30 @@ keypress(XKeyEvent *ev)
 		default:
 			return;
 		}
-	} else if (ev->state & Mod1Mask) {
-		switch(ksym) {
+	} else if (keyEvent->state & Mod1Mask) {
+		switch(keySymbol) {
 		case XK_b:
 			movewordedge(-1);
 			goto draw;
 		case XK_f:
 			movewordedge(+1);
 			goto draw;
-		case XK_g: ksym = XK_Home;  break;
-		case XK_G: ksym = XK_End;   break;
-		case XK_h: ksym = XK_Up;    break;
-		case XK_j: ksym = XK_Next;  break;
-		case XK_k: ksym = XK_Prior; break;
-		case XK_l: ksym = XK_Down;  break;
+		case XK_g: keySymbol = XK_Home;  break;
+		case XK_G: keySymbol = XK_End;   break;
+		case XK_h: keySymbol = XK_Up;    break;
+		case XK_j: keySymbol = XK_Next;  break;
+		case XK_k: keySymbol = XK_Prior; break;
+		case XK_l: keySymbol = XK_Down;  break;
 		default:
 			return;
 		}
 	}
 
-	switch(ksym) {
+	switch(keySymbol) {
 	default:
 insert:
-		if (!iscntrl(*buf))
-			insert(buf, len);
+		if (!iscntrl(*buffer))
+			insert(buffer, length);
 		break;
 	case XK_Delete:
 	case XK_KP_Delete:
@@ -517,8 +513,8 @@ insert:
 		break;
 	case XK_Return:
 	case XK_KP_Enter:
-		puts((sel && !(ev->state & ShiftMask)) ? sel->text : text);
-		if (!(ev->state & ControlMask)) {
+		puts((sel && !(keyEvent->state & ShiftMask)) ? sel->text : text);
+		if (!(keyEvent->state & ControlMask)) {
 			cleanup();
 			exit(0);
 		}
@@ -564,8 +560,8 @@ paste(void)
 	Atom da;
 
 	/* we have been given the current selection, now insert it into input */
-	if (XGetWindowProperty(dpy, win, utf8, 0, (sizeof text / 4) + 1, False,
-	                   utf8, &da, &di, &dl, &dl, (unsigned char **)&p)
+	if (XGetWindowProperty(display, window, utf8, 0, (sizeof text / 4) + 1, False,
+                           utf8, &da, &di, &dl, &dl, (unsigned char **)&p)
 	    == Success && p) {
 		insert(p, (q = strchr(p, '\n')) ? q - p : (ssize_t)strlen(p));
 		XFree(p);
@@ -603,39 +599,37 @@ readstdin(void)
 	lines = MIN(lines, i);
 }
 
-static void
-run(void)
-{
-	XEvent ev;
+static void run(void) {
+	XEvent event;
 
-	while (!XNextEvent(dpy, &ev)) {
-		if (XFilterEvent(&ev, win))
+	while (!XNextEvent(display, &event)) {
+		if (XFilterEvent(&event, window))
 			continue;
-		switch(ev.type) {
+		switch(event.type) {
 		case DestroyNotify:
-			if (ev.xdestroywindow.window != win)
+			if (event.xdestroywindow.window != window)
 				break;
 			cleanup();
 			exit(1);
 		case Expose:
-			if (ev.xexpose.count == 0)
-				drw_map(drw, win, 0, 0, mw, mh);
+			if (event.xexpose.count == 0)
+				drw_map(drw, window, 0, 0, mw, mh);
 			break;
 		case FocusIn:
 			/* regrab focus from parent window */
-			if (ev.xfocus.window != win)
+			if (event.xfocus.window != window)
 				grabfocus();
 			break;
 		case KeyPress:
-			keypress(&ev.xkey);
+            keyPress(&event.xkey);
 			break;
 		case SelectionNotify:
-			if (ev.xselection.property == utf8)
+			if (event.xselection.property == utf8)
 				paste();
 			break;
 		case VisibilityNotify:
-			if (ev.xvisibility.state != VisibilityUnobscured)
-				XRaiseWindow(dpy, win);
+			if (event.xvisibility.state != VisibilityUnobscured)
+				XRaiseWindow(display, window);
 			break;
 		}
 	}
@@ -660,8 +654,8 @@ setup(void)
 	for (j = 0; j < SchemeLast; j++)
 		scheme[j] = drw_scm_create(drw, colors[j], 2);
 
-	clip = XInternAtom(dpy, "CLIPBOARD",   False);
-	utf8 = XInternAtom(dpy, "UTF8_STRING", False);
+	clip = XInternAtom(display, "CLIPBOARD", False);
+	utf8 = XInternAtom(display, "UTF8_STRING", False);
 
 	/* calculate menu geometry */
 	bh = drw->fonts->h + 2;
@@ -669,18 +663,18 @@ setup(void)
 	mh = (lines + 1) * bh;
 #ifdef XINERAMA
 	i = 0;
-	if (parentwin == root && (info = XineramaQueryScreens(dpy, &n))) {
-		XGetInputFocus(dpy, &w, &di);
+	if (parentWindow == root && (info = XineramaQueryScreens(display, &n))) {
+		XGetInputFocus(display, &w, &di);
 		if (mon >= 0 && mon < n)
 			i = mon;
 		else if (w != root && w != PointerRoot && w != None) {
 			/* find top-level window containing current input focus */
 			do {
-				if (XQueryTree(dpy, (pw = w), &dw, &w, &dws, &du) && dws)
+				if (XQueryTree(display, (pw = w), &dw, &w, &dws, &du) && dws)
 					XFree(dws);
 			} while (w != root && w != pw);
 			/* find xinerama screen with which the window intersects most */
-			if (XGetWindowAttributes(dpy, pw, &wa))
+			if (XGetWindowAttributes(display, pw, &wa))
 				for (j = 0; j < n; j++)
 					if ((a = INTERSECT(wa.x, wa.y, wa.width, wa.height, info[j])) > area) {
 						area = a;
@@ -688,7 +682,7 @@ setup(void)
 					}
 		}
 		/* no focused window is on screen, so use pointer location instead */
-		if (mon < 0 && !area && XQueryPointer(dpy, root, &dw, &dw, &x, &y, &di, &di, &du))
+		if (mon < 0 && !area && XQueryPointer(display, root, &dw, &dw, &x, &y, &di, &di, &du))
 			for (i = 0; i < n; i++)
 				if (INTERSECT(x, y, 1, 1, info[i]))
 					break;
@@ -700,9 +694,9 @@ setup(void)
 	} else
 #endif
 	{
-		if (!XGetWindowAttributes(dpy, parentwin, &wa))
+		if (!XGetWindowAttributes(display, parentWindow, &wa))
 			die("could not get embedding window attributes: 0x%lx",
-			    parentwin);
+                parentWindow);
 		x = 0;
 		y = topbar ? 0 : wa.height - mh;
 		mw = wa.width;
@@ -715,25 +709,25 @@ setup(void)
 	swa.override_redirect = True;
 	swa.background_pixel = scheme[SchemeNorm][ColBg].pixel;
 	swa.event_mask = ExposureMask | KeyPressMask | VisibilityChangeMask;
-	win = XCreateWindow(dpy, parentwin, x, y, mw, mh, 0,
-	                    CopyFromParent, CopyFromParent, CopyFromParent,
+    window = XCreateWindow(display, parentWindow, x, y, mw, mh, 0,
+                           CopyFromParent, CopyFromParent, CopyFromParent,
 	                    CWOverrideRedirect | CWBackPixel | CWEventMask, &swa);
-	XSetClassHint(dpy, win, &ch);
+	XSetClassHint(display, window, &ch);
 
 
 	/* input methods */
-	if ((xim = XOpenIM(dpy, NULL, NULL, NULL)) == NULL)
+	if ((xim = XOpenIM(display, NULL, NULL, NULL)) == NULL)
 		die("XOpenIM failed: could not open input device");
 
-	xic = XCreateIC(xim, XNInputStyle, XIMPreeditNothing | XIMStatusNothing,
-	                XNClientWindow, win, XNFocusWindow, win, NULL);
+    inputContext = XCreateIC(xim, XNInputStyle, XIMPreeditNothing | XIMStatusNothing,
+                             XNClientWindow, window, XNFocusWindow, window, NULL);
 
-	XMapRaised(dpy, win);
+	XMapRaised(display, window);
 	if (embed) {
-		XSelectInput(dpy, parentwin, FocusChangeMask | SubstructureNotifyMask);
-		if (XQueryTree(dpy, parentwin, &dw, &w, &dws, &du) && dws) {
-			for (i = 0; i < du && dws[i] != win; ++i)
-				XSelectInput(dpy, dws[i], FocusChangeMask);
+		XSelectInput(display, parentWindow, FocusChangeMask | SubstructureNotifyMask);
+		if (XQueryTree(display, parentWindow, &dw, &w, &dws, &du) && dws) {
+			for (i = 0; i < du && dws[i] != window; ++i)
+				XSelectInput(display, dws[i], FocusChangeMask);
 			XFree(dws);
 		}
 		grabfocus();
@@ -751,10 +745,8 @@ usage(void)
 	exit(1);
 }
 
-int
-main(int argc, char *argv[])
-{
-	XWindowAttributes wa;
+int main(int argc, char *argv[]) {
+	XWindowAttributes windowAttributes;
 	int i, fast = 0;
 
 	for (i = 1; i < argc; i++)
@@ -801,16 +793,16 @@ main(int argc, char *argv[])
 
 	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale())
 		fputs("warning: no locale support\n", stderr);
-	if (!(dpy = XOpenDisplay(NULL)))
+	if (!(display = XOpenDisplay(NULL)))
 		die("cannot open display");
-	screen = DefaultScreen(dpy);
-	root = RootWindow(dpy, screen);
-	if (!embed || !(parentwin = strtol(embed, NULL, 0)))
-		parentwin = root;
-	if (!XGetWindowAttributes(dpy, parentwin, &wa))
+	screen = DefaultScreen(display);
+	root = RootWindow(display, screen);
+	if (!embed || !(parentWindow = strtol(embed, NULL, 0)))
+        parentWindow = root;
+	if (!XGetWindowAttributes(display, parentWindow, &windowAttributes))
 		die("could not get embedding window attributes: 0x%lx",
-		    parentwin);
-	drw = drw_create(dpy, screen, root, wa.width, wa.height);
+            parentWindow);
+	drw = drw_create(display, screen, root, windowAttributes.width, windowAttributes.height);
 	if (!drw_fontset_create(drw, fonts, LENGTH(fonts)))
 		die("no fonts could be loaded.");
 	lrpad = drw->fonts->h;
@@ -821,11 +813,11 @@ main(int argc, char *argv[])
 #endif
 
 	if (fast && !isatty(0)) {
-		grabkeyboard();
+        grabKeyboard();
 		readstdin();
 	} else {
 		readstdin();
-		grabkeyboard();
+        grabKeyboard();
 	}
 	setup();
 	run();
